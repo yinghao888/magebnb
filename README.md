@@ -5,6 +5,8 @@
 
 必须用动态代理 静态一秒钟就死。www.abcproxy.com 我用的这家的，如果没有可以找我买 官网价格5折
 
+动态填写格式：hostname:port:username:password
+
 安装依赖
 
 ```
