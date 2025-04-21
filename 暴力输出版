@@ -1,0 +1,211 @@
+# 配置项
+REQUESTS_PER_MINUTE = 10000  # 每分钟请求数（目标 10000 次）
+CONCURRENT_TASKS = max(10, int(REQUESTS_PER_MINUTE / 60 / 2))  # 并发任务数，约 84
+PROXY = "http://dauhjjuhj1-zone-abc:hqaiuru111@2f7121246ab53bad.abcproxy.vip:4950"  # 代理地址
+
+import asyncio
+import aiohttp
+import threading
+import os
+import portalocker
+from web3 import Web3
+from eth_account import Account
+import logging
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from aiohttp import ClientResponseError, ClientConnectionError, ContentTypeError
+
+# 设置日志
+logging.basicConfig(filename='airdrop.log', level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s', encoding='utf-8')
+
+# 初始化Web3连接（仅用于生成地址，MegaBNB测试链）
+w3 = Web3(Web3.HTTPProvider("https://rpc.mbscan.io"))
+if not w3.is_connected():
+    print("❌ 无法连接到 MegaBNB 测试链 RPC")
+    logging.error("无法连接到 MegaBNB 测试链 RPC")
+    exit(1)
+
+# 请求头（空投API，简化并启用压缩）
+headers = {
+    'accept': 'application/json',
+    'content-type': 'application/json',
+    'origin': 'https://www.megabnb.world',
+    'referer': 'https://www.megabnb.world/',
+    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/135.0',
+    'accept-encoding': 'gzip, deflate'
+}
+
+# 文件路径
+success_file = "success.txt"
+key_file = "key.txt"  # 存储私钥的文件
+counter_file = "record_counter.txt"
+
+# 线程锁（保护内存缓存）
+lock = threading.Lock()
+
+# 内存缓存结果
+success_results = []
+key_results = []
+
+# 每1000万条记录重命名一次
+RECORD_LIMIT = 10_000_000
+file_index = 1  # 文件编号（key1.txt, key2.txt, ...）
+
+def get_record_count():
+    """读取总记录数"""
+    try:
+        with open(counter_file, 'r', encoding='utf-8') as f:
+            portalocker.lock(f, portalocker.LOCK_EX)
+            count = int(f.read().strip() or 0)
+            portalocker.unlock(f)
+            return count
+    except FileNotFoundError:
+        with open(counter_file, 'w', encoding='utf-8') as f:
+            f.write("0\n")
+        return 0
+    except Exception as e:
+        logging.error(f"读取记录数失败: {e}")
+        return 0
+
+def update_record_count(new_count):
+    """更新总记录数"""
+    try:
+        with open(counter_file, 'w', encoding='utf-8') as f:
+            portalocker.lock(f, portalocker.LOCK_EX)
+            f.write(f"{new_count}\n")
+            portalocker.unlock(f)
+    except Exception as e:
+        logging.error(f"更新记录数失败: {e}")
+
+def generate_evm_address():
+    """生成新的EVM地址和私钥"""
+    account = Account.create()
+    return account.address, account.key.hex()
+
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2.0), 
+       retry=retry_if_exception_type((ClientConnectionError, ClientResponseError)))
+async def claim_airdrop(session, address, private_key, semaphore):
+    """异步领取空投"""
+    async with semaphore:  # 限制并发任务数
+        url = 'https://mbscan.io/airdrop'
+        data = {'address': address}
+        
+        try:
+            async with session.post(url, json=data, headers=headers, proxy=PROXY, timeout=10) as response:
+                print(f"地址: {address} | 状态码: {response.status}")
+                logging.info(f"领取空投状态码: {response.status}, 地址: {address}")
+                
+                # 检测限流或服务器错误
+                if response.status in (429, 520):
+                    if response.status == 429:
+                        global CONCURRENT_TASKS
+                        CONCURRENT_TASKS = max(10, CONCURRENT_TASKS - 10)
+                        print(f"⚠️ 检测到API限流，并发任务数调整为: {CONCURRENT_TASKS}")
+                        logging.warning(f"API限流，并发任务数调整为: {CONCURRENT_TASKS}")
+                    else:  # 520 错误
+                        print(f"⚠️ 检测到服务器520错误，跳过重试")
+                        logging.warning(f"服务器520错误，地址: {address}")
+                    return None
+                try:
+                    response_json = await response.json()
+                    if response_json.get('success', False):
+                        amount = response_json.get('amount', 0)
+                        tx_hash = response_json.get('tx_hash', 'N/A')
+                        print(f"领取成功！地址: {address} | 金额: {amount} wei | 交易哈希: {tx_hash}")
+                        logging.info(f"领取成功，地址: {address}, 金额: {amount} wei, 交易哈希: {tx_hash}")
+                        with lock:
+                            success_results.append(f"{address},{amount},{tx_hash}")
+                            key_results.append(private_key)  # 记录成功私钥
+                        return amount
+                    else:
+                        print(f"领取失败: {response_json}")
+                        logging.error(f"领取失败，地址: {address}, 响应: {response_json}")
+                        return None
+                except (json.JSONDecodeError, ContentTypeError) as e:
+                    print(f"响应格式错误: {e}, 状态码: {response.status}, 内容: {await response.text()[:500]}")
+                    logging.error(f"响应格式错误，地址: {address}, 错误: {e}, 状态码: {response.status}, 内容: {await response.text()[:500]}")
+                    return None
+        except Exception as e:
+            print(f"请求失败: {e}")
+            logging.error(f"请求失败，地址: {address}, 错误: {e}")
+            return None
+
+async def process_address(session, semaphore):
+    """处理单个地址的生成和领取"""
+    address, private_key = generate_evm_address()
+    print(f"生成地址: {address}")
+    logging.info(f"生成地址: {address}")
+    
+    # 领取空投（不等待结果，后台处理）
+    await claim_airdrop(session, address, private_key, semaphore)
+
+def save_results():
+    """保存结果到文件并检查记录数"""
+    global file_index
+    with lock:
+        if success_results:
+            with open(success_file, 'a', encoding='utf-8') as f:
+                portalocker.lock(f, portalocker.LOCK_EX)
+                f.write("\n".join(success_results) + "\n")
+                portalocker.unlock(f)
+            success_results.clear()
+        if key_results:
+            # 更新记录数
+            current_count = get_record_count()
+            new_count = current_count + len(key_results)
+            update_record_count(new_count)
+            
+            # 追加写入私钥
+            with open(key_file, 'a', encoding='utf-8') as f:
+                portalocker.lock(f, portalocker.LOCK_EX)
+                f.write("\n".join(key_results) + "\n")
+                portalocker.unlock(f)
+            
+            # 检查是否达到1000万
+            if new_count >= RECORD_LIMIT:
+                # 重命名文件
+                new_filename = f"key{file_index}.txt"
+                os.rename(key_file, new_filename)
+                print(f"✅ 私钥记录达到1000万，保存为: {new_filename}")
+                logging.info(f"私钥记录达到1000万，保存为: {new_filename}")
+                
+                # 创建新的 key.txt（不初始化为空）
+                with open(key_file, 'a', encoding='utf-8') as f:
+                    pass
+                update_record_count(0)
+                file_index += 1
+            
+            key_results.clear()
+
+async def main():
+    # 创建持久化的 aiohttp 会话，限制并发连接
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=50)) as session:
+        # 使用信号量控制并发任务数
+        semaphore = asyncio.Semaphore(CONCURRENT_TASKS)
+        try:
+            while True:
+                # 并发处理一批地址
+                tasks = []
+                for _ in range(CONCURRENT_TASKS):
+                    task = asyncio.create_task(process_address(session, semaphore))
+                    tasks.append(task)
+                
+                # 不等待任务完成，立即继续下一批
+                await asyncio.sleep(0)  # 让出控制权，允许任务调度
+                
+                # 定期保存结果
+                save_results()
+                
+                # 无休息时间
+        except KeyboardInterrupt:
+            print("脚本已手动停止")
+            logging.info("脚本已手动停止")
+            save_results()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print(f"脚本异常: {e}")
+        logging.error(f"脚本异常: {e}")
+        save_results()
