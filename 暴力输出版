@@ -1,7 +1,7 @@
 # 配置项
 REQUESTS_PER_MINUTE = 10000  # 每分钟请求数（目标 10000 次）
 CONCURRENT_TASKS = max(10, int(REQUESTS_PER_MINUTE / 60 / 2))  # 并发任务数，约 84
-PROXY = "http://dauhjjuhj1-zone-abc:hqaiuru111@2f7121246ab53bad.abcproxy.vip:4950"  # 代理地址
+PROXY = ""  # 代理地址
 
 import asyncio
 import aiohttp
