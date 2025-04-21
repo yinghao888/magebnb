@@ -1,6 +1,6 @@
 # 配置项
-REQUESTS_PER_MINUTE = 10000  # 每分钟请求数（目标 10000 次）
-CONCURRENT_TASKS = max(10, int(REQUESTS_PER_MINUTE / 60 / 2))  # 并发任务数，约 84
+REQUESTS_PER_MINUTE = 10000  # 每分钟请求数
+CONCURRENT_TASKS = max(10, int(REQUESTS_PER_MINUTE / 60 / 2))  # 
 PROXY = ""  # 代理地址
 
 import asyncio
@@ -18,14 +18,14 @@ from aiohttp import ClientResponseError, ClientConnectionError, ContentTypeError
 logging.basicConfig(filename='airdrop.log', level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s', encoding='utf-8')
 
-# 初始化Web3连接（仅用于生成地址，MegaBNB测试链）
+# 初始化Web3连接
 w3 = Web3(Web3.HTTPProvider("https://rpc.mbscan.io"))
 if not w3.is_connected():
     print("❌ 无法连接到 MegaBNB 测试链 RPC")
     logging.error("无法连接到 MegaBNB 测试链 RPC")
     exit(1)
 
-# 请求头（空投API，简化并启用压缩）
+# 请求头
 headers = {
     'accept': 'application/json',
     'content-type': 'application/json',
@@ -40,7 +40,7 @@ success_file = "success.txt"
 key_file = "key.txt"  # 存储私钥的文件
 counter_file = "record_counter.txt"
 
-# 线程锁（保护内存缓存）
+# 线程锁
 lock = threading.Lock()
 
 # 内存缓存结果
