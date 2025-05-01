@@ -19,19 +19,21 @@ if [[ $PYTHON_MAJOR -lt 3 || ($PYTHON_MAJOR -eq 3 && $PYTHON_MINOR -lt 8) ]]; th
 fi
 echo "Python版本：$PYTHON_VERSION"
 
-# 安装pip（如果未安装）
-if ! command -v pip3 &> /dev/null; then
-    echo "安装pip..."
-    curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-    python3 get-pip.py
-    rm get-pip.py
-fi
+# 创建并激活虚拟环境
+echo "创建虚拟环境..."
+python3 -m venv venv
+source venv/bin/activate
+
+# 确保pip是最新的
+echo "更新pip..."
+pip install --upgrade pip --quiet
 
 # 安装依赖
 echo "安装Python依赖..."
-pip3 install loguru web3 requests --quiet
+pip install loguru web3 requests --quiet
 if [[ $? -ne 0 ]]; then
     echo "错误：安装依赖失败！请检查网络连接或pip配置。"
+    deactivate
     exit 1
 fi
 echo "依赖安装完成。"
@@ -45,6 +47,7 @@ if [[ ! -f "t3rn_bridge.py" ]]; then
     wget -O t3rn_bridge.py $BASE_URL/t3rn_bridge.py
     if [[ $? -ne 0 ]]; then
         echo "错误：下载 t3rn_bridge.py 失败！"
+        deactivate
         exit 1
     fi
     sed -i 's/\r//' t3rn_bridge.py
@@ -58,6 +61,7 @@ if [[ ! -f "utils.py" ]]; then
     wget -O utils.py $BASE_URL/utils.py
     if [[ $? -ne 0 ]]; then
         echo "错误：下载 utils.py 失败！"
+        deactivate
         exit 1
     fi
     sed -i 's/\r//' utils.py
@@ -138,7 +142,7 @@ fi
 if [[ ! -f "proxy.txt" ]]; then
     echo "创建代理文件 proxy.txt..."
     touch proxy.txt
-    echo "# 请在此文件中添加您的代理（格式：user:pass@ip:port 或 ip:port，每行一个）" > proxy.txt
+    echo "# 请在此文件中添加您的代理（格式：user:pass@ip:port 或 ip:port，每行一个）" > pk.txt
     echo "已创建 proxy.txt，如果需要使用代理，请在文件中添加代理地址。"
 else
     echo "proxy.txt 已存在，跳过创建。"
@@ -146,10 +150,13 @@ fi
 
 # 启动程序
 echo "启动 T3RN桥接机器人..."
-python3 t3rn_bridge.py
+python t3rn_bridge.py
 if [[ $? -ne 0 ]]; then
     echo "错误：启动程序失败！请检查 Python 脚本和配置文件。"
+    deactivate
     exit 1
 fi
 
+# 退出虚拟环境
+deactivate
 echo "程序已退出。"
