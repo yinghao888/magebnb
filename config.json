@@ -1,0 +1,42 @@
+{
+  "api": {
+    "base_url": "https://api.unlock3d.t3rn.io",
+    "timeout": 30
+  },
+  "chains": {
+    "base_sepolia": {
+      "rpc_url": "https://sepolia.base.org",
+      "bridge_contract": "0xYourBridgeContractAddress",
+      "api_name": "base_sepolia",
+      "gas_price_gwei": 1.5,
+      "gas_limit": 150000
+    },
+    "optimism_sepolia": {
+      "rpc_url": "https://sepolia.optimism.io",
+      "bridge_contract": "0xYourBridgeContractAddress",
+      "api_name": "optimism_sepolia",
+      "gas_price_gwei": 1.5,
+      "gas_limit": 150000
+    }
+  },
+  "bridge": {
+    "repeat_count": 1,
+    "amount": {
+      "min": 0.01,
+      "max": 0.05
+    },
+    "wait_for_completion": true,
+    "custom_flow": false
+  },
+  "delay": {
+    "between_bridges": 30,
+    "between_repeats": 60
+  },
+  "threads": 5,
+  "use_proxy": false,
+  "retries": {
+    "max_attempts": 3,
+    "backoff_factor": 2,
+    "initial_wait": 1
+  }
+}
